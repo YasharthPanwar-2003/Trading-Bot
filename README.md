@@ -1,18 +1,16 @@
 # Binance Futures Testnet Trading Bot
 
-Python CLI app for placing Binance USD-M Futures testnet/demo orders with validation, structured logging, error handling, and a reusable code structure.
+A Python CLI trading bot for Binance USD-M Futures testnet/demo. It places MARKET and LIMIT orders, validates user input, logs requests/responses, and keeps Binance API access separated from CLI code.
 
-## Features
+## Highlights
 
-- Place MARKET orders.
-- Place LIMIT orders.
-- Bonus: place STOP-LIMIT orders.
-- Supports BUY and SELL sides.
-- Validates CLI input before sending an order.
-- Formats quantity and price using Binance exchange rules.
-- Writes structured JSON logs.
-- Provides utility commands for balance, price, positions, open orders, order status, cancellation, and position closing.
-- Includes unit tests that do not require Binance credentials.
+- MARKET and LIMIT orders
+- BUY and SELL support
+- Bonus STOP-LIMIT order type
+- Confirmation prompts and `--yes` automation
+- JSON log files for order requests, responses, and errors
+- Commands for balance, price, open orders, order status, cancellation, positions, and position closing
+- Unit tests with fake Binance clients, so tests run without real API keys
 
 ## Project Structure
 
@@ -21,92 +19,95 @@ trading_bot/
   bot/
     __init__.py
     client.py          # Binance Futures API wrapper
-    orders.py          # Order placement and retry logic
+    orders.py          # Order placement, retry, response parsing
     validators.py      # Input and exchange-rule validation
-    logging_config.py  # Console and JSON file logging
+    logging_config.py  # Console and JSON logging
   tests/
     test_orders.py
-  cli.py
+  cli.py               # Typer CLI entry point
   .env.example
   .gitignore
   README.md
   requirements.txt
 ```
 
-## How It Works
+## Architecture
 
-1. User runs a Typer CLI command in PowerShell.
-2. `cli.py` prints an order summary and asks for confirmation unless `--yes` is passed.
-3. `OrderManager` validates the request.
-4. `OrderValidator` checks symbol, side, order type, quantity, price, and Binance tick/step size rules.
-5. `BinanceFuturesClient` sends the request to Binance USD-M Futures testnet/demo.
-6. The CLI prints `orderId`, status, executed quantity, average price when available, and success/failure.
-7. JSON logs are written to the selected log file.
-
-## Prerequisites
-
-- PowerShell
-- `uv` installed
-- Binance Futures Testnet/Demo API key and secret
-- Testnet/demo USDT balance
-
-On this machine, `python` is not available directly on PATH, so the recommended commands use `uv`.
-
-## Binance API Keys
-
-Do not use a normal Binance Spot/Mainnet API key.
-
-Use a Binance Futures Testnet/Demo key. Current Binance Futures demo keys use:
-
-```text
-https://demo-fapi.binance.com
+```mermaid
+flowchart LR
+  User[User / PowerShell] --> CLI[cli.py]
+  CLI --> Manager[OrderManager]
+  CLI --> Client[BinanceFuturesClient]
+  Manager --> Validator[OrderValidator]
+  Validator --> ExchangeInfo[Binance exchangeInfo]
+  Manager --> Client
+  Client --> Binance[Binance USD-M Futures Testnet/Demo]
+  Manager --> Logs[JSON log file]
+  CLI --> Output[Order summary and result]
 ```
 
-The assignment mentions:
+## User Flow
 
-```text
-https://testnet.binancefuture.com
+```mermaid
+flowchart TD
+  A[Create .env with Futures demo keys] --> B[Test connection]
+  B --> C{Connection OK?}
+  C -- No --> D[Fix key, endpoint, or permissions]
+  D --> B
+  C -- Yes --> E[Run balance or price command]
+  E --> F[Place MARKET or LIMIT order]
+  F --> G[Review CLI summary]
+  G --> H{Confirm?}
+  H -- No --> I[Cancel locally]
+  H -- Yes --> J[Send signed order request]
+  J --> K[Print orderId, status, executedQty]
+  K --> L[Write JSON log]
+  L --> M[Check open orders / positions]
 ```
 
-This project supports both:
+## Order State Flow
 
-- `BINANCE_USE_DEMO_URL=true` for current Binance Demo/Futures keys.
-- `BINANCE_USE_DEMO_URL=false` only for legacy `testnet.binancefuture.com` keys.
-
-If Binance returns this error:
-
-```text
-API Error (code=-2015): Invalid API-key, IP, or permissions for action
+```mermaid
+stateDiagram-v2
+  [*] --> InputReceived
+  InputReceived --> ValidatingInput
+  ValidatingInput --> Failed: invalid symbol/side/type/qty/price
+  ValidatingInput --> CheckingExchangeRules
+  CheckingExchangeRules --> Failed: symbol not found or below min qty
+  CheckingExchangeRules --> WaitingForConfirmation
+  WaitingForConfirmation --> Cancelled: user rejects
+  WaitingForConfirmation --> SendingOrder: confirmed or --yes
+  SendingOrder --> Retry: retryable API/network error
+  Retry --> SendingOrder
+  SendingOrder --> Failed: permanent API error
+  SendingOrder --> Accepted: Binance returns order
+  Accepted --> Logged
+  Logged --> [*]
+  Cancelled --> [*]
+  Failed --> [*]
 ```
-
-check that:
-
-- The key was created for Futures Testnet/Demo, not Spot/Mainnet.
-- API/Futures trading permission is enabled.
-- IP restriction allows your current IP, or is disabled while testing.
-- API key and secret are on separate `.env` lines.
 
 ## Setup
 
-From this project folder:
+Use PowerShell from the project folder:
 
 ```powershell
 cd C:\Users\vish9\Downloads\trading_bot_project_full\trading_bot
 ```
 
-Check the CLI:
+This machine uses `uv` to provide Python:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py --help
 ```
 
-Create your `.env`:
+Create local credentials file:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Edit `.env`:
+Fill `.env`:
 
 ```env
 BINANCE_API_KEY=your_testnet_or_demo_key
@@ -118,15 +119,38 @@ LOG_FILE=logs/trading_bot.log
 
 Never commit `.env`.
 
-## Required Commands
+## Binance Key Notes
 
-Test signed Binance connectivity:
+Use a Futures testnet/demo key, not a normal Spot/Mainnet key.
+
+Current Binance Futures demo keys use:
+
+```text
+https://demo-fapi.binance.com
+```
+
+The assignment mentions:
+
+```text
+https://testnet.binancefuture.com
+```
+
+The app supports both endpoints:
+
+- `BINANCE_USE_DEMO_URL=true` for current Binance Demo/Futures keys
+- `BINANCE_USE_DEMO_URL=false` for legacy `testnet.binancefuture.com` keys
+
+If you see `API Error (code=-2015)`, check that the key is a Futures demo/testnet key, API trading is enabled, IP restrictions allow your IP, and the secret is pasted correctly.
+
+## Core Commands
+
+Check signed connectivity:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py test-connection
 ```
 
-Check balance:
+Show balance:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py balance
@@ -144,85 +168,63 @@ Place a LIMIT order:
 uv run --with-requirements requirements.txt python cli.py limit --symbol BTCUSDT --side SELL --quantity 0.001 --price 120000
 ```
 
-Skip confirmation for repeatable testing:
+Skip confirmation:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py market --symbol BTCUSDT --side BUY --quantity 0.001 --yes
 ```
 
-## Bonus Command
+## Bonus Order
 
-Place a STOP-LIMIT order:
+STOP-LIMIT:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py stop-limit --symbol BTCUSDT --side SELL --quantity 0.001 --price 109000 --stop-price 110000
 ```
 
-## Useful Utility Commands
-
-Get mark price:
+## Utility Commands
 
 ```powershell
+# Current mark price
 uv run --with-requirements requirements.txt python cli.py price --symbol BTCUSDT
-```
 
-Set leverage:
-
-```powershell
+# Set leverage
 uv run --with-requirements requirements.txt python cli.py set-leverage --symbol BTCUSDT --leverage 5
-```
 
-Show open orders:
-
-```powershell
+# Show open orders
 uv run --with-requirements requirements.txt python cli.py open-orders --symbol BTCUSDT
-```
 
-Check one order:
-
-```powershell
+# Check one order
 uv run --with-requirements requirements.txt python cli.py order-status --symbol BTCUSDT --order-id 123456789
-```
 
-Cancel an open order:
-
-```powershell
+# Cancel one open order
 uv run --with-requirements requirements.txt python cli.py cancel-order --symbol BTCUSDT --order-id 123456789
-```
 
-Show open positions:
-
-```powershell
+# Show open positions
 uv run --with-requirements requirements.txt python cli.py positions
-```
 
-Close an open position safely with a reduce-only MARKET order:
-
-```powershell
+# Close an open position with a reduce-only market order
 uv run --with-requirements requirements.txt python cli.py close-position --symbol BTCUSDT
 ```
 
 ## Logs
 
-Logs are ignored by Git because they can contain account/order details.
+Logs are ignored by Git because they may contain account or order details.
 
-Default log file:
+Default log:
 
 ```text
 logs/trading_bot.log
 ```
 
-Generate the required evaluator logs locally:
+Generate evaluator logs locally:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py market --symbol BTCUSDT --side BUY --quantity 0.001 --yes --log-file logs/market_order.log
-```
-
-```powershell
 uv run --with-requirements requirements.txt python cli.py limit --symbol BTCUSDT --side SELL --quantity 0.001 --price 120000 --yes --log-file logs/limit_order.log
 ```
 
-For a public GitHub repo, keep logs ignored. If the evaluator requires logs, attach sanitized copies separately or include them in a private zip submission.
+For public GitHub submission, keep logs ignored. If logs are required, attach sanitized copies separately or submit them in a private zip.
 
 Example log entry:
 
@@ -241,21 +243,17 @@ Example log entry:
 
 ## Tests
 
-Run tests:
-
 ```powershell
 uv run --with-requirements requirements.txt python -m unittest discover -s tests
 ```
 
-The tests use fake Binance clients, so they do not need real API keys.
+The tests use fake Binance clients and cover:
 
-Current coverage checks:
-
-- LIMIT orders require price.
-- Quantity is formatted using `LOT_SIZE.stepSize`.
-- Price is formatted using `PRICE_FILTER.tickSize`.
-- MARKET orders request `newOrderRespType=RESULT`.
-- STOP-LIMIT maps to Binance order type `STOP`.
+- LIMIT order requires price
+- quantity formatting by `LOT_SIZE.stepSize`
+- price formatting by `PRICE_FILTER.tickSize`
+- MARKET order uses `newOrderRespType=RESULT`
+- STOP-LIMIT maps to Binance type `STOP`
 
 ## Cleanup After Testing
 
@@ -266,13 +264,13 @@ uv run --with-requirements requirements.txt python cli.py open-orders --symbol B
 uv run --with-requirements requirements.txt python cli.py positions
 ```
 
-If there is an open order, cancel it:
+Cancel open order:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py cancel-order --symbol BTCUSDT --order-id 123456789
 ```
 
-If there is an open position, close it:
+Close open position:
 
 ```powershell
 uv run --with-requirements requirements.txt python cli.py close-position --symbol BTCUSDT --yes
@@ -280,33 +278,21 @@ uv run --with-requirements requirements.txt python cli.py close-position --symbo
 
 ## GitHub Submission
 
-Initialize Git locally:
-
 ```powershell
 git init
 git add .
 git status
-```
-
-Before committing, confirm `.env` and `logs/` are not staged.
-
-Commit:
-
-```powershell
 git commit -m "Build Binance Futures testnet trading bot"
-```
-
-Create an empty GitHub repo, then connect it:
-
-```powershell
 git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
 git branch -M main
 git push -u origin main
 ```
 
+Before committing, make sure `.env` and `logs/` are not staged.
+
 ## Assumptions
 
-- This app is for Binance USD-M Futures testnet/demo only.
-- It does not use Binance mainnet.
-- Current Binance Demo/Futures keys should use `BINANCE_USE_DEMO_URL=true`.
-- Logs are generated locally and ignored by Git by default.
+- The app is for Binance USD-M Futures testnet/demo only.
+- Mainnet trading is intentionally not used.
+- `BINANCE_USE_DEMO_URL=true` is the expected setting for current Binance demo keys.
+- Logs are generated locally and ignored by default.
