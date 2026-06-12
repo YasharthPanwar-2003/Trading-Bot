@@ -34,55 +34,50 @@ trading_bot/
 ## Architecture
 
 ```mermaid
-flowchart LR
-  User[User / PowerShell] --> CLI[cli.py]
-  CLI --> Manager[OrderManager]
-  CLI --> Client[BinanceFuturesClient]
-  Manager --> Validator[OrderValidator]
-  Validator --> ExchangeInfo[Binance exchangeInfo]
-  Manager --> Client
-  Client --> Binance[Binance USD-M Futures Testnet/Demo]
-  Manager --> Logs[JSON log file]
-  CLI --> Output[Order summary and result]
+flowchart TD
+  A[PowerShell CLI] --> B[cli.py]
+  B --> C[OrderManager]
+  C --> D[OrderValidator]
+  D --> E[Binance exchange rules]
+  D --> F[Build order request]
+  F --> G[BinanceFuturesClient]
+  G --> H[Binance Futures Testnet/Demo]
+  H --> I[Order response]
+  I --> J[Console output]
+  I --> K[JSON log file]
 ```
 
 ## User Flow
 
 ```mermaid
 flowchart TD
-  A[Create .env with Futures demo keys] --> B[Test connection]
-  B --> C{Connection OK?}
-  C -- No --> D[Fix key, endpoint, or permissions]
-  D --> B
-  C -- Yes --> E[Run balance or price command]
-  E --> F[Place MARKET or LIMIT order]
-  F --> G[Review CLI summary]
-  G --> H{Confirm?}
-  H -- No --> I[Cancel locally]
-  H -- Yes --> J[Send signed order request]
-  J --> K[Print orderId, status, executedQty]
-  K --> L[Write JSON log]
-  L --> M[Check open orders / positions]
+  A[Create .env] --> B[Test connection]
+  B --> C[Check balance]
+  C --> D[Run market or limit command]
+  D --> E[Review order summary]
+  E --> F{Confirm?}
+  F -->|No| G[Stop safely]
+  F -->|Yes| H[Place order]
+  H --> I[Print result]
+  I --> J[Write log]
+  J --> K[Check orders or positions]
 ```
 
 ## Order State Flow
 
 ```mermaid
 stateDiagram-v2
-  [*] --> InputReceived
-  InputReceived --> ValidatingInput
-  ValidatingInput --> Failed: invalid symbol/side/type/qty/price
-  ValidatingInput --> CheckingExchangeRules
-  CheckingExchangeRules --> Failed: symbol not found or below min qty
-  CheckingExchangeRules --> WaitingForConfirmation
-  WaitingForConfirmation --> Cancelled: user rejects
-  WaitingForConfirmation --> SendingOrder: confirmed or --yes
-  SendingOrder --> Retry: retryable API/network error
-  Retry --> SendingOrder
-  SendingOrder --> Failed: permanent API error
-  SendingOrder --> Accepted: Binance returns order
+  [*] --> Draft
+  Draft --> Validating
+  Validating --> Rejected: invalid input
+  Validating --> Ready: valid input
+  Ready --> Cancelled: user cancels
+  Ready --> Submitted: user confirms
+  Submitted --> Accepted: Binance accepts
+  Submitted --> Failed: API error
   Accepted --> Logged
   Logged --> [*]
+  Rejected --> [*]
   Cancelled --> [*]
   Failed --> [*]
 ```
